@@ -43,7 +43,7 @@ struct Args {
     window_size: usize,
 
     /// Fraction of A's in the window to consider as internal priming
-    #[arg(short='f', long, default_value_t = 0.8)]
+    #[arg(short='f', long, default_value_t = 0.7)]
     fraction: f32,
 
     /// Number of threads to use
