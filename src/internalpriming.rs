@@ -24,8 +24,8 @@ pub fn read_bam(bam_path: &str, anno_introns: &HashMap<String, Vec<String>>, ref
         let cigar = record.cigar();
         let begin_cigar = cigar.iter().next();
         let end_cigar = cigar.iter().last();
-        let mut win1_start;
-        let mut win1_end;
+        let mut win1_start; // 0-based, inclusive
+        let mut win1_end; // 0-based, exclusive
         if let Some(cg) = begin_cigar {
             let op = cg.char();
             let len = cg.len() as i64;
@@ -79,6 +79,13 @@ pub fn read_bam(bam_path: &str, anno_introns: &HashMap<String, Vec<String>>, ref
         let win2_t_count = win2_ref_seq.iter().filter(|&&c| c == 't' as u8).count();
         let win1_t_fraction = win1_t_count as f32 / window_size as f32;
         let win2_t_fraction = win2_t_count as f32 / window_size as f32;
+        // if record.qname() == b"" {
+        //     info!("{:?}\t{},{},{},{}", std::str::from_utf8(record.qname()), win1_a_fraction, win2_a_fraction, win1_t_fraction, win2_t_fraction);
+        //     info!("igv region: {}:{}-{},{}:{}-{}", chr, win1_start + 1, win1_end, chr, win2_start + 1, win2_end);
+        //     info!("ref pos (1-based, inclusive): {}\t{}", start + 1, end);
+        //     info!("{:?}\t{:?}", std::str::from_utf8(&win1_ref_seq), std::str::from_utf8(&win2_ref_seq));
+        //     info!("{}:{}, {}:{}", begin_cigar.unwrap().char(), begin_cigar.unwrap().len(), end_cigar.unwrap().char(), end_cigar.unwrap().len());
+        // }
         if win1_a_fraction >= fraction || win1_t_fraction >= fraction || win2_a_fraction >= fraction || win2_t_fraction >= fraction {
             // info!("{:?}\t{},{},{},{}", std::str::from_utf8(record.qname()), win1_a_fraction, win2_a_fraction, win1_t_fraction, win2_t_fraction);
             continue;
