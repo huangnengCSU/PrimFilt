@@ -79,7 +79,12 @@ fn main() {
     } else {
         info!("No annotation file provided.");
     }
-    info!("Output BAM file: {}", output_bam_file);
+    info!("Filtered output BAM file: {}", output_bam_file);
+    if let Some(discarded) = &discarded_output_bam_file {
+        info!("Discarded output BAM file: {}", discarded);
+    } else {
+        info!("No discarded output BAM file.");
+    }
     info!("Window size: {}", window_size);
     info!("Fraction of A's: {}", fraction);
     info!("Number of threads: {}", num_threads);
