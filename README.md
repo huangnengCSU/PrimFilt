@@ -23,7 +23,9 @@ Options:
   -o, --output <OUTPUT>
           Filtered output BAM file
   -d, --discarded-output <DISCARDED_OUTPUT>
-          Discarded output BAM file
+          Discarded output BAM file, optional
+  -p, --primers-trimmed
+          Primer sequences (e.g. oligo(dT)) are trimmed from reads, default: false
   -w, --window-size <WINDOW_SIZE>
           Window size for check interal priming [default: 20]
   -f, --fraction <FRACTION>

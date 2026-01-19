@@ -39,9 +39,13 @@ struct Args {
     #[arg(short='o', long)]
     output: String,
 
-    /// Discarded output BAM file
+    /// Discarded output BAM file, optional
     #[arg(short='d', long)]
     discarded_output: Option<String>,
+
+    /// Primer sequences (e.g. oligo(dT)) are trimmed from reads, default: false
+    #[arg(short='p', long, default_value_t = false)]
+    primers_trimmed: bool,
 
     /// Window size for check interal priming
     #[arg(short='w', long, default_value_t = 20)]
@@ -68,6 +72,7 @@ fn main() {
     let annotation_file = arg.annotation.clone();
     let output_bam_file = arg.output.clone();
     let discarded_output_bam_file = arg.discarded_output.clone();
+    let primers_trimmed = arg.primers_trimmed;
     let window_size = arg.window_size;
     let fraction = arg.fraction;
     let num_threads = arg.threads;
@@ -85,6 +90,7 @@ fn main() {
     } else {
         info!("No discarded output BAM file.");
     }
+    info!("Primers trimmed: {}", primers_trimmed);
     info!("Window size: {}", window_size);
     info!("Fraction of A's: {}", fraction);
     info!("Number of threads: {}", num_threads);
@@ -116,7 +122,7 @@ fn main() {
             let chr_gene_regions= gene_regions.get(chr).unwrap_or(&empty_gene_regions);
             let chr_gene_introns = gene_introns.get(chr).unwrap_or(&empty_gene_introns);
             let chr_gene_tree = build_gene_tree(&chr_gene_regions);
-            let (records, discarded_records) = read_bam(&input_bam_file, &chr_gene_tree, &chr_gene_introns, &ref_seqs, chr, window_size, fraction);
+            let (records, discarded_records) = read_bam(&input_bam_file, &chr_gene_tree, &chr_gene_introns, &ref_seqs, chr, primers_trimmed, window_size, fraction);
             info!("Number of records processed for chromosome {}: {}", chr, records.len());
             let mut writer = mutex_fw.lock().unwrap();
             for record in records {

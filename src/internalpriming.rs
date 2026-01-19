@@ -9,7 +9,7 @@ use rust_htslib::bam::Read;
 use rust_htslib::bam::record::Aux;
 use crate::annotation::query_gene_tree;
 
-pub fn read_bam(bam_path: &str, chr_gene_tree: &IntervalTree<u32, String>, chr_gene_introns: &HashMap<String, HashSet<String>>, ref_seqs: &HashMap<String, Vec<u8>>, chr: &str, window_size: usize, fraction: f32) -> (Vec<Record>, Vec<Record>) {
+pub fn read_bam(bam_path: &str, chr_gene_tree: &IntervalTree<u32, String>, chr_gene_introns: &HashMap<String, HashSet<String>>, ref_seqs: &HashMap<String, Vec<u8>>, chr: &str, primers_trimmed: bool, window_size: usize, fraction: f32) -> (Vec<Record>, Vec<Record>) {
     let mut out_records = Vec::new();
     let mut discarded_records = Vec::new();
     let mut bam = bam::IndexedReader::from_path(bam_path).expect("Failed to open BAM file");
@@ -26,48 +26,62 @@ pub fn read_bam(bam_path: &str, chr_gene_tree: &IntervalTree<u32, String>, chr_g
         let cigar = record.cigar();
         let begin_cigar = cigar.iter().next();
         let end_cigar = cigar.iter().last();
-        let mut win1_start; // 0-based, inclusive
-        let mut win1_end; // 0-based, exclusive
-        if let Some(cg) = begin_cigar {
-            let op = cg.char();
-            let len = cg.len() as i64;
-            if op == 'S' || op == 'H' {
-                win1_end = start - len;
+        let mut win1_start = 0; // 0-based, inclusive
+        let mut win1_end= 0; // 0-based, exclusive
+        let mut win2_start= 0;
+        let mut win2_end= 0;
+        if primers_trimmed == true {
+            if let Some(cg) = begin_cigar {
+                let op = cg.char();
+                let len = cg.len() as i64;
+                if op == 'S' || op == 'H' {
+                    win1_end = start - len;
+                } else {
+                    win1_end = start;
+                }
+                win1_start = win1_end - window_size as i64;
             } else {
                 win1_end = start;
+                win1_start = win1_end - window_size as i64;
             }
-            win1_start = win1_end - window_size as i64;
-        } else {
-            win1_end = start;
-            win1_start = win1_end - window_size as i64;
-        }
-        if win1_start < 0 {
-            win1_start = 0;
-        }
-        if win1_end < 0 {
-            win1_end = 0;
-        }
-        let mut win2_start;
-        let mut win2_end;
-        if let Some(cg) = end_cigar {
-            let op = cg.char();
-            let len = cg.len() as i64;
-            if op == 'S' || op == 'H' {
-                win2_start = end + len;
+            if win1_start < 0 {
+                win1_start = 0;
+            }
+            if win1_end < 0 {
+                win1_end = 0;
+            }
+            if let Some(cg) = end_cigar {
+                let op = cg.char();
+                let len = cg.len() as i64;
+                if op == 'S' || op == 'H' {
+                    win2_start = end + len;
+                } else {
+                    win2_start = end;
+                }
+                win2_end = win2_start + window_size as i64;
             } else {
                 win2_start = end;
+                win2_end = win2_start + window_size as i64;
             }
-            win2_end = win2_start + window_size as i64;
+            if win2_start > chr_len as i64 {
+                win2_start = chr_len as i64;
+            }
+            if win2_end > chr_len as i64 {
+                win2_end = chr_len as i64;
+            }
         } else {
-            win2_start = end;
-            win2_end = win2_start + window_size as i64;
+            win1_start = record.reference_start();  // 0-based, inclusive
+            win1_end = win1_start + window_size as i64; // 0-based, exclusive
+            win2_end = record.reference_end();  // 0-based, exclusive
+            win2_start = win2_end - window_size as i64; // 0-based, inclusive
+            if win1_end > win2_end {
+                win1_end = win2_end;
+            }
+            if win2_start < win1_start {
+                win2_start = win1_start;
+            }
         }
-        if win2_start > chr_len as i64 {
-            win2_start = chr_len as i64;
-        }
-        if win2_end > chr_len as i64 {
-            win2_end = chr_len as i64;
-        }
+
         let win1_ref_seq = ref_seqs[chr][win1_start as usize..win1_end as usize].to_ascii_lowercase();
         let win2_ref_seq = ref_seqs[chr][win2_start as usize..win2_end as usize].to_ascii_lowercase();
         // Calculate fraction of A's in the windows
