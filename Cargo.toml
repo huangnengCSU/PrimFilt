@@ -7,6 +7,7 @@ description = "A long-read RNA-seq internal priming detection and filtering tool
 license = "MIT"
 repository = "https://github.com/huangnengCSU/PrimFilt"
 homepage = "https://github.com/huangnengCSU/PrimFilt"
+readme = "README.md"
 
 [dependencies]
 rust-htslib = { version = "0.50.0", default-features = false }
@@ -20,3 +21,12 @@ log = "0.4.27"
 
 [profile.release]
 opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1        # 开发时也有一定优化，提升测试速度
+
+[profile.test]
+opt-level = 2
