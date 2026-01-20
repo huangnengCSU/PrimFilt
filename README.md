@@ -52,6 +52,7 @@ PrimFilt -i input.bam -r reference.fa -o filtered.bam -d discarded.bam -w 20 -f 
 
 ### 0.1.1 - 2026-01-20
 - Added `--primers-trimmed` argument to indicate if primer sequences are trimmed from reads.
+- Implemented logic for untrimmed reads: detect a poly(A)/poly(T) tail at the read end (≥10 nt with up to 1 error) and evaluate internal-priming signals accordingly.
 
 ### 0.1.0 - 2026-01-10
 - Core internal priming detection functionality
