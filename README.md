@@ -43,6 +43,21 @@ PrimFilt -i input.bam -r reference.fa -o filtered.bam -d discarded.bam -w 20 -f 
 ```shell
 PrimFilt -i input.bam -r reference.fa -a annotation.gtf -o filtered.bam -d discarded.bam -w 20 -f 0.7 -t 8
 ```
+- **Primers trimmed**. If primer sequences are trimmed from reads, use the `--primers-trimmed` argument to indicate this.
+```shell
+PrimFilt -i input.bam -r reference.fa -o filtered.bam -d discarded.bam -w 20 -f 0.7 -t 8 -p
+```
+
+## Update Log
+
+### 0.1.1 - 2026-01-20
+- Added `--primers-trimmed` argument to indicate if primer sequences are trimmed from reads.
+
+### 0.1.0 - 2026-01-10
+- Core internal priming detection functionality
+- Optional annotation-aware filtering
+- Multithreaded BAM processing
+
 
 ## Acknowledgement
 PrimFilt is inspired by the talon_label_reads module in [TALON](https://github.com/mortazavilab/TALON). Building on this foundation, PrimFilt incorporates optional gene annotation support, enabling selective filtering of internally primed reads that are not associated with annotated intronic regions.
