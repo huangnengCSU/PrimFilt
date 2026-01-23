@@ -31,7 +31,7 @@ fn parse_attributes(attributes: &str, file_type: &str) -> HashMap<String, String
     field_map
 }
 
-pub fn load_gene_introns_from_annotation(annotation_file: &str) -> (HashMap<String, HashMap<String, HashSet<String>>>, HashMap<String, HashMap<String, Region>>) {
+pub fn load_gene_introns_from_annotation(annotation_file: &str) -> (HashMap<String, HashMap<String, HashSet<String>>>, HashMap<String, HashMap<String, Region>>, HashMap<String, HashMap<String, HashSet<i64>>>) {
     let file_type = if annotation_file.contains(".gff3") { "gff3" } else { "gtf" };
     let reader: Box<dyn BufRead> = if annotation_file.ends_with(".gz") {
         Box::new(BufReader::new(GzDecoder::new(File::open(annotation_file).unwrap())))
@@ -42,6 +42,7 @@ pub fn load_gene_introns_from_annotation(annotation_file: &str) -> (HashMap<Stri
     let mut gene_regions = HashMap::new();
     let mut exon_regions: HashMap<String, HashMap<String, Vec<Region>>> = HashMap::new();
     let mut introns: HashMap<String, HashMap<String, HashSet<String>>> = HashMap::new(); // chrom -> gene_name -> set of introns (1-based, both inclusive)
+    let mut transcript_ends: HashMap<String, HashMap<String, HashSet<i64>>> = HashMap::new(); // chrom -> gene_name -> set of transcript end positions
 
     for line in reader.lines().flatten() {
         if line.starts_with('#') { continue; }
@@ -82,6 +83,18 @@ pub fn load_gene_introns_from_annotation(annotation_file: &str) -> (HashMap<Stri
                     max_coverage: None,
                     gene_id: None,
                 });
+        } else if feature_type == "transcript" {
+            let dot_string = ".".to_string();
+            let gene_name = attrs.get("gene_name").unwrap_or(&dot_string).to_string();
+            let chr = parts[0].to_string();
+            let end1 = parts[3].parse().unwrap_or(0i64);
+            let end2 = parts[4].parse().unwrap_or(0i64);
+            transcript_ends
+                .entry(chr.clone())
+                .or_default()
+                .entry(gene_name.clone())
+                .or_default()
+                .extend([end1, end2]);
         }
     }
 
@@ -109,7 +122,7 @@ pub fn load_gene_introns_from_annotation(annotation_file: &str) -> (HashMap<Stri
             }
         }
     }
-    (introns, gene_regions)
+    (introns, gene_regions, transcript_ends)
 }
 
 

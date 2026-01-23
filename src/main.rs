@@ -57,9 +57,14 @@ struct Args {
     #[arg(short='w', long, default_value_t = 20)]
     window_size: usize,
 
-    /// Fraction of A's in the window to consider as internal priming
+    /// Fraction of A's in the window to consider as internal priming, default: 0.7.
+    /// Recommended: 0.7 for primer-trimmed reads, 0.6 for non-trimmed reads.
     #[arg(short='f', long, default_value_t = 0.7)]
     fraction: f32,
+
+    /// Maximum distance to known annotated transcript end
+    #[arg(short='e', long, default_value_t = 100)]
+    end_distance: i64,
 
     /// Number of threads to use
     #[arg(short='t', long, default_value_t = 1)]
@@ -81,6 +86,7 @@ fn main() {
     let primers_trimmed = arg.primers_trimmed;
     let window_size = arg.window_size;
     let fraction = arg.fraction;
+    let end_distance = arg.end_distance;
     let num_threads = arg.threads;
 
     info!("Input BAM file: {}", input_bam_file);
@@ -103,8 +109,9 @@ fn main() {
 
     let mut gene_introns: HashMap<String, HashMap<String, HashSet<String>>> = HashMap::new();
     let mut gene_regions = HashMap::new();
+    let mut transcript_ends: HashMap<String, HashMap<String, HashSet<i64>>> = HashMap::new();
     if annotation_file.is_some() {
-        (gene_introns, gene_regions) = load_gene_introns_from_annotation(annotation_file.unwrap().as_str());
+        (gene_introns, gene_regions, transcript_ends) = load_gene_introns_from_annotation(annotation_file.unwrap().as_str());
     }
 
     let ref_seqs = load_reference(&reference_file);
@@ -125,10 +132,12 @@ fn main() {
         ref_seqs.par_iter().for_each(|(chr, seq)| {
             let empty_gene_regions: HashMap<String, Region> = HashMap::new();   // in case no providing annotation
             let empty_gene_introns: HashMap<String, HashSet<String>> = HashMap::new();  // in case no providing annotation
+            let empty_gene_transcript_ends: HashMap<String, HashSet<i64>> = HashMap::new(); // in cese no providing annotation
             let chr_gene_regions= gene_regions.get(chr).unwrap_or(&empty_gene_regions);
             let chr_gene_introns = gene_introns.get(chr).unwrap_or(&empty_gene_introns);
+            let chr_gene_transcript_ends = transcript_ends.get(chr).unwrap_or(&empty_gene_transcript_ends);
             let chr_gene_tree = build_gene_tree(&chr_gene_regions);
-            let (records, discarded_records) = read_bam(&input_bam_file, &chr_gene_tree, &chr_gene_introns, &ref_seqs, chr, primers_trimmed, window_size, fraction);
+            let (records, discarded_records) = read_bam(&input_bam_file, &chr_gene_tree, &chr_gene_introns, &chr_gene_transcript_ends, &ref_seqs, chr, primers_trimmed, window_size, fraction, end_distance);
             info!("Number of records processed for chromosome {}: {}", chr, records.len());
             let mut writer = mutex_fw.lock().unwrap();
             for record in records {

@@ -29,7 +29,9 @@ Options:
   -w, --window-size <WINDOW_SIZE>
           Window size for check interal priming [default: 20]
   -f, --fraction <FRACTION>
-          Fraction of A's in the window to consider as internal priming [default: 0.7]
+          Fraction of A's in the window to consider as internal priming, default: 0.7. Recommended: 0.7 for primer-trimmed reads, 0.6 for non-trimmed reads [default: 0.7]
+  -e, --end-distance <END_DISTANCE>
+          Maximum distance to known annotated transcript end [default: 100]
   -t, --threads <THREADS>
           Number of threads to use [default: 1]
   -h, --help
@@ -49,6 +51,9 @@ PrimFilt -i input.bam -r reference.fa -o filtered.bam -d discarded.bam -w 20 -f 
 ```
 
 ## Update Log
+### 0.1.2 - 2026-01-23
+- Added `--end-distance` argument to set the maximum allowed distance to a known transcript end.
+- Implemented additional filtering logic for reads with internal priming signals: reads are discarded if they do not overlap any annotated intron, or if their distance to the nearest annotated transcript end exceeds the threshold (default: 100 bp). 
 
 ### 0.1.1 - 2026-01-20
 - Added `--primers-trimmed` argument to indicate if primer sequences are trimmed from reads.
