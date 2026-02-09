@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use bio::data_structures::interval_tree::IntervalTree;
+use bio::data_structures::interval_tree::ArrayBackedIntervalTree;
 use log::info;
 
 use rust_htslib::bam;
@@ -97,7 +97,16 @@ fn closest_distance(sorted: &[i64], target: i64) -> i64 {
     }
 }
 
-pub fn read_bam(bam_path: &str, chr_gene_tree: &IntervalTree<u32, String>, chr_gene_introns: &HashMap<String, HashSet<String>>, chr_gene_transcript_ends: &HashMap<String, HashSet<i64>>, ref_seqs: &HashMap<String, Vec<u8>>, chr: &str, primers_trimmed: bool, window_size: usize, fraction: f32, end_distance: i64) -> (Vec<Record>, Vec<Record>) {
+pub fn read_bam(bam_path: &str,
+                chr_gene_tree: &ArrayBackedIntervalTree<u32, String>,
+                chr_gene_introns: &HashMap<String, HashSet<String>>,
+                chr_gene_transcript_ends: &HashMap<String, HashSet<i64>>,
+                ref_seqs: &HashMap<String, Vec<u8>>,
+                chr: &str,
+                primers_trimmed: bool,
+                window_size: usize,
+                fraction: f32,
+                end_distance: i64) -> (Vec<Record>, Vec<Record>) {
     let mut out_records = Vec::new();
     let mut discarded_records = Vec::new();
     let mut bam = bam::IndexedReader::from_path(bam_path).expect("Failed to open BAM file");
@@ -276,24 +285,24 @@ pub fn read_bam(bam_path: &str, chr_gene_tree: &IntervalTree<u32, String>, chr_g
 
 
         let overlapping_genes: Vec<String> = query_gene_tree(&chr_gene_tree, start as u32 + 1, end as u32 + 1); // 1-based, start inclusive, end exclusive
-        let mut has_annotated_intron = false;
-        let mut annotated_intron = String::new();
-        for gene_name in overlapping_genes.iter() {
-            if !chr_gene_introns.contains_key(gene_name) {
-                continue;
-            }
-            let gene_introns = &chr_gene_introns[gene_name];
-            for intron in read_introns.iter() {
-                if gene_introns.contains(intron) {
-                    has_annotated_intron = true;
-                    annotated_intron = intron.clone();
-                    break;
-                }
-            }
-            if has_annotated_intron {
-                break;
-            }
-        }
+        // let mut has_annotated_intron = false;
+        // let mut annotated_intron = String::new();
+        // for gene_name in overlapping_genes.iter() {
+        //     if !chr_gene_introns.contains_key(gene_name) {
+        //         continue;
+        //     }
+        //     let gene_introns = &chr_gene_introns[gene_name];
+        //     for intron in read_introns.iter() {
+        //         if gene_introns.contains(intron) {
+        //             has_annotated_intron = true;
+        //             annotated_intron = intron.clone();
+        //             break;
+        //         }
+        //     }
+        //     if has_annotated_intron {
+        //         break;
+        //     }
+        // }
 
         // check if the read end is close to transcript ends
         let mut ends: HashSet<i64> = HashSet::new();
@@ -335,18 +344,27 @@ pub fn read_bam(bam_path: &str, chr_gene_tree: &IntervalTree<u32, String>, chr_g
             //     info!("ref pos (1-based, inclusive): {}\t{}", start + 1, end);
             //     info!("{:?}\t{:?}", std::str::from_utf8(&win1_ref_seq), std::str::from_utf8(&win2_ref_seq));
             //     info!("{}:{}, {}:{}", begin_cigar.unwrap().char(), begin_cigar.unwrap().len(), end_cigar.unwrap().char(), end_cigar.unwrap().len());
-            //     info!("Annotated intron: {}", annotated_intron);
+            //     // info!("Annotated intron: {}", annotated_intron);
+            //     if (win1_a_fraction >= fraction || win1_t_fraction >= fraction) && win1_dist > end_distance {
+            //         info!("discarded by win1");
+            //     } else if (win2_a_fraction >= fraction || win2_t_fraction >= fraction) && win2_dist > end_distance {
+            //         info!("discarded by win2");
+            //     } else {
+            //         info!("not discarded");
+            //     }
             // }
 
-            if (win1_a_fraction >= fraction || win1_t_fraction >= fraction) && (!has_annotated_intron || win1_dist > end_distance) {
+            if (win1_a_fraction >= fraction || win1_t_fraction >= fraction) && win1_dist > end_distance {
                 discarded_records.push(record);
-            } else if (win2_a_fraction >= fraction || win2_t_fraction >= fraction) && (!has_annotated_intron || win2_dist > end_distance) {
+            } else if (win2_a_fraction >= fraction || win2_t_fraction >= fraction) && win2_dist > end_distance {
                 discarded_records.push(record);
             } else {
                 out_records.push(record);
             }
 
-            // if (win1_a_fraction >= fraction || win1_t_fraction >= fraction || win2_a_fraction >= fraction || win2_t_fraction >= fraction) && !has_annotated_intron {
+            // if (win1_a_fraction >= fraction || win1_t_fraction >= fraction) && (!has_annotated_intron || win1_dist > end_distance) {
+            //     discarded_records.push(record);
+            // } else if (win2_a_fraction >= fraction || win2_t_fraction >= fraction) && (!has_annotated_intron || win2_dist > end_distance) {
             //     discarded_records.push(record);
             // } else {
             //     out_records.push(record);
@@ -378,36 +396,42 @@ pub fn read_bam(bam_path: &str, chr_gene_tree: &IntervalTree<u32, String>, chr_g
             //     info!("win2 polyA: {}", is_polyA_win2);
             //     info!("win1 dist: {}, win1_start: {}", win1_dist, win1_start + 1);
             //     info!("win2 dist: {}, win2_end: {}", win2_dist, win2_end);
-            //     info!("has annotated intron: {}", has_annotated_intron);
-            //     info!("win1_A: {:?}\t{:?},{}/{}", win1_a_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), major_count_win1, win1_read_seq.len());
-            //     info!("win1_T: {:?}\t{:?},{}/{}", win1_t_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), major_count_win1, win1_read_seq.len());
-            //     info!("win2_A: {:?}\t{:?},{}/{}", win2_a_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), major_count_win2, win2_read_seq.len());
-            //     info!("win2_T: {:?}\t{:?},{}/{}", win2_t_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), major_count_win2, win2_read_seq.len());
+            //     // info!("has annotated intron: {}", has_annotated_intron);
+            //     info!("win1_A: {:?}\t{:?},{}/{}", win1_a_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_A_count, window_size);
+            //     info!("win1_T: {:?}\t{:?},{}/{}", win1_t_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_T_count, window_size);
+            //     info!("win2_A: {:?}\t{:?},{}/{}", win2_a_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_A_count, window_size);
+            //     info!("win2_T: {:?}\t{:?},{}/{}", win2_t_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_T_count, window_size);
             //     info!("igv region: {}:{}-{},{}:{}-{}", chr, win1_start + 1, win1_end, chr, win2_start + 1, win2_end);
             //     info!("ref pos (1-based, inclusive): {}\t{}", start + 1, end);
             //     info!("ref seq: {:?}\t{:?}", std::str::from_utf8(&win1_ref_seq), std::str::from_utf8(&win2_ref_seq));
             //     info!("read seq: {:?}\t{:?}", std::str::from_utf8(&win1_read_seq), std::str::from_utf8(&win2_read_seq));
             //     info!("{}:{}, {}:{}", begin_cigar.unwrap().char(), begin_cigar.unwrap().len(), end_cigar.unwrap().char(), end_cigar.unwrap().len());
-            //     info!("Annotated intron: {}", annotated_intron);
+            //     // info!("Annotated intron: {}", annotated_intron);
+            //     if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
+            //         info!("discarded by win1");
+            //     } else if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
+            //         info!("discarded by win2");
+            //     } else {
+            //         info!("not discarded");
+            //     }
             // }
 
-            if (is_polyT_win1 && win1_t_fraction >= fraction) && (!has_annotated_intron || win1_dist > end_distance) {
+            // Discard the records: polyA signal + far from known transcript ends (2 conditions must be satisfied)
+            if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
                 discarded_records.push(record);
-            } else if (is_polyA_win2 && win2_a_fraction >= fraction) && (!has_annotated_intron || win2_dist > end_distance) {
+            } else if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
                 discarded_records.push(record);
             } else {
                 out_records.push(record);
             }
 
-            // if has_annotated_intron {
-            //     out_records.push(record);
+            // // Discard the records: polyA signal + no annotated intron + far from known transcript ends (3 conditions must be satisfied)
+            // if (is_polyT_win1 && win1_t_fraction >= fraction) && (!has_annotated_intron && win1_dist > end_distance) {
+            //     discarded_records.push(record);
+            // } else if (is_polyA_win2 && win2_a_fraction >= fraction) && (!has_annotated_intron && win2_dist > end_distance) {
+            //     discarded_records.push(record);
             // } else {
-            //     // no annotated intron
-            //     if (is_polyT_win1 && win1_t_fraction >= fraction) || (is_polyA_win2 && win2_a_fraction >= fraction) {
-            //         discarded_records.push(record);
-            //     } else {
-            //         out_records.push(record);
-            //     }
+            //     out_records.push(record);
             // }
         }
     }
