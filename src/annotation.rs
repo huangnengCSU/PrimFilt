@@ -6,7 +6,7 @@ use flate2::read::GzDecoder;
 
 use crate::util::Region;
 
-use bio::data_structures::interval_tree::IntervalTree;
+use bio::data_structures::interval_tree::ArrayBackedIntervalTree;
 
 fn parse_attributes(attributes: &str, file_type: &str) -> HashMap<String, String> {
     let mut field_map = HashMap::new();
@@ -126,15 +126,16 @@ pub fn load_gene_introns_from_annotation(annotation_file: &str) -> (HashMap<Stri
 }
 
 
-pub fn build_gene_tree(chr_gene_regions: &HashMap<String, Region>) -> IntervalTree<u32, String> {
-    let mut tree = IntervalTree::new();
+pub fn build_gene_tree(chr_gene_regions: &HashMap<String, Region>) -> ArrayBackedIntervalTree<u32, String> {
+    let mut tree = ArrayBackedIntervalTree::new();
     for (gene_name, gene_region) in chr_gene_regions.iter() {
         tree.insert(gene_region.start..gene_region.end, gene_name.clone()); // interval is [start, end), 1-based
     }
+    tree.index();   // required by ArrayBackedIntervalTree, static tree
     tree
 }
 
-pub fn query_gene_tree(tree: &IntervalTree<u32, String>, start: u32, end: u32) -> Vec<String> {
+pub fn query_gene_tree(tree: &ArrayBackedIntervalTree<u32, String>, start: u32, end: u32) -> Vec<String> {
     // start: 1-based, inclusive
     // end: 1-based, exclusive
     let mut gene_names = Vec::new();
