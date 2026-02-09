@@ -51,6 +51,10 @@ PrimFilt -i input.bam -r reference.fa -o filtered.bam -d discarded.bam -w 20 -f 
 ```
 
 ## Update Log
+### 0.1.3 - 2026-02-09
+- Replaced `IntervalTree` with `ArrayBackedIntervalTree` to improve interval query performance.
+- Updated read-filtering logic: filtering is now based solely on internal priming signals and the distance to known transcript ends (if annotation provided); the presence of annotated introns is no longer considered.
+
 ### 0.1.2 - 2026-01-23
 - Added `--end-distance` argument to set the maximum allowed distance to a known transcript end.
 - Implemented additional filtering logic for reads with internal priming signals: reads are discarded if they do not overlap any annotated intron, or if their distance to the nearest annotated transcript end exceeds the threshold (default: 100 bp). 
