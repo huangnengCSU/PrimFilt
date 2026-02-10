@@ -97,6 +97,16 @@ fn closest_distance(sorted: &[i64], target: i64) -> i64 {
     }
 }
 
+pub struct IPFeature {
+    pub reference_sequence: Vec<u8>,
+    pub read_sequence: Vec<u8>,
+    pub chr: String,
+    pub start: i64, // 1-based, inclusive
+    pub end: i64,   // 1-based, exclusive
+    pub readname: String,
+    pub label: u8, // 1 for internal priming, 0 for non-internal priming
+}
+
 pub fn read_bam(bam_path: &str,
                 chr_gene_tree: &ArrayBackedIntervalTree<u32, String>,
                 chr_gene_introns: &HashMap<String, HashSet<String>>,
@@ -106,9 +116,11 @@ pub fn read_bam(bam_path: &str,
                 primers_trimmed: bool,
                 window_size: usize,
                 fraction: f32,
-                end_distance: i64) -> (Vec<Record>, Vec<Record>) {
+                end_distance: i64,
+                feature_length: usize) -> (Vec<Record>, Vec<Record>, Vec<IPFeature>) {
     let mut out_records = Vec::new();
     let mut discarded_records = Vec::new();
+    let mut out_features = Vec::new();
     let mut bam = bam::IndexedReader::from_path(bam_path).expect("Failed to open BAM file");
     // bam.set_threads(num_threads).expect("Failed to set BAM threads");
     let header = bam.header().to_owned();
@@ -318,6 +330,270 @@ pub fn read_bam(bam_path: &str,
         sorted_ends.sort_unstable();
 
 
+        // ===========================================================================
+        // 头部 240bp alignment (120bp in the aligned part and 120bp in the clipped part)
+        // ===========================================================================
+        let half_len = (feature_length / 2) as usize;
+        let head_ref_pos = record.reference_start();
+
+        // 获取读序列起始位置（跳过soft-clip）
+        let head_read_pos = cigar.first()
+            .filter(|op| op.char() == 'S')
+            .map(|op| op.len() as usize)
+            .unwrap_or(0);
+
+        // ---------------------------
+        // 提取参考序列窗口
+        // ---------------------------
+        let chr_seq = &ref_seqs[chr];
+        let chr_len = chr_seq.len() as i64;
+
+        let head_ref_seq: String = (head_ref_pos - half_len as i64..head_ref_pos + half_len as i64)
+            .map(|p| {
+                if p < 0 || p >= chr_len {
+                    '*'
+                } else {
+                    (chr_seq[p as usize] as char).to_ascii_lowercase()
+                }
+            })
+            .collect();
+
+        // ---------------------------
+        // 提取读序列左半部分（带padding）
+        // ---------------------------
+        let seq_bytes = record.seq().as_bytes();
+        let read_len = seq_bytes.len() as i64;
+
+        let head_read_seq_half1: String = (head_read_pos as i64 - half_len as i64..head_read_pos as i64)
+            .map(|p| {
+                if p < 0 || p >= read_len {
+                    '*'
+                } else {
+                    (record.seq()[p as usize] as char).to_ascii_lowercase()
+                }
+            })
+            .collect();
+
+        // ---------------------------
+        // 提取读序列右半部分（根据CIGAR，带padding）
+        // ---------------------------
+        let mut head_read_seq_half2 = String::with_capacity(half_len);
+        let mut ref_pos = head_ref_pos;
+        let mut read_pos = head_read_pos;
+        let mut ref_idx = half_len; // 对应 head_ref_seq 中的索引位置
+
+        for cg in cigar.iter() {
+            if head_read_seq_half2.len() >= half_len {
+                break; // 已经提取足够长度
+            }
+
+            match cg.char() {
+                'M' | '=' | 'X' => {
+                    let len = (cg.len() as usize).min(half_len - head_read_seq_half2.len());
+                    for i in 0..len {
+                        let read_base = record.seq()[read_pos + i];
+                        head_read_seq_half2.push((read_base as char).to_ascii_lowercase());
+
+                        // 验证参考序列匹配
+                        debug_assert_eq!(
+                            ref_seqs[chr][(ref_pos + i as i64) as usize],
+                            head_ref_seq.as_bytes()[ref_idx]
+                        );
+                        ref_idx += 1;
+                    }
+                    ref_pos += len as i64;
+                    read_pos += len;
+                }
+                'D' => {
+                    let len = (cg.len() as usize).min(half_len - head_read_seq_half2.len());
+                    for i in 0..len {
+                        head_read_seq_half2.push('-');
+                        // 验证参考序列匹配
+                        debug_assert_eq!(
+                            ref_seqs[chr][(ref_pos + i as i64) as usize],
+                            head_ref_seq.as_bytes()[ref_idx]
+                        );
+                        ref_idx += 1;
+                    }
+                    ref_pos += len as i64;
+                }
+                'N' => {
+                    let len = (cg.len() as usize).min(half_len - head_read_seq_half2.len());
+                    for i in 0..len {
+                        head_read_seq_half2.push('N');
+                        // 验证参考序列匹配
+                        debug_assert_eq!(
+                            ref_seqs[chr][(ref_pos + i as i64) as usize],
+                            head_ref_seq.as_bytes()[ref_idx]
+                        );
+                        ref_idx += 1;
+                    }
+                    ref_pos += len as i64;
+                }
+                'I' => {
+                    read_pos += cg.len() as usize;
+                }
+                'S' | 'H' => {
+                    // Soft/Hard clip - 跳过
+                }
+                _ => {}
+            }
+        }
+
+        // 如果不够长度，用 '*' 填充
+        while head_read_seq_half2.len() < half_len {
+            head_read_seq_half2.push('*');
+        }
+
+        // 合并读序列两半
+        let head_read_seq = format!("{}{}", head_read_seq_half1, head_read_seq_half2);
+
+        let mut head_feature = IPFeature {
+            reference_sequence: head_ref_seq.into_bytes(),
+            read_sequence: head_read_seq.into_bytes(),
+            chr: chr.to_string(),
+            start: head_ref_pos - half_len as i64 + 1, // 转为1-based
+            end: head_ref_pos + half_len as i64, // 1-based, exclusive
+            readname: String::from_utf8_lossy(record.qname()).to_string(),
+            label: 0, // 先标记为非内部引物，后续根据窗口特征更新
+        };
+
+
+        // ===========================================================================
+        // 尾部 240bp alignment (120bp in the aligned part and 120bp in the clipped part)
+        // ===========================================================================
+
+        // 计算比对结束位置
+        let mut tail_ref_pos = record.reference_start();
+        let mut tail_read_pos = head_read_pos; // 从首个比对碱基开始
+
+        for cg in cigar.iter() {
+            match cg.char() {
+                'M' | '=' | 'X' | 'D' => {
+                    tail_ref_pos += cg.len() as i64;
+                }
+                _ => {}
+            }
+            match cg.char() {
+                'M' | '=' | 'X' | 'I' => {
+                    tail_read_pos += cg.len() as usize;
+                }
+                _ => {}
+            }
+        }
+
+        // ---------------------------
+        // 提取尾部参考序列窗口
+        // ---------------------------
+        let tail_ref_seq: String = (tail_ref_pos - half_len as i64..tail_ref_pos + half_len as i64)
+            .map(|p| {
+                if p < 0 || p >= chr_len {
+                    '*'
+                } else {
+                    (chr_seq[p as usize] as char).to_ascii_lowercase()
+                }
+            })
+            .collect();
+
+        // ---------------------------
+        // 提取尾部读序列左半部分（根据CIGAR反向，带padding）
+        // ---------------------------
+        let mut tail_read_seq_half1 = String::with_capacity(half_len);
+        let mut ref_pos = tail_ref_pos - 1;
+        let mut read_pos = tail_read_pos - 1;
+        let mut ref_idx = half_len - 1; // 从中间往左
+
+        // 反向遍历 CIGAR
+        for cg in cigar.iter().rev() {
+            if tail_read_seq_half1.len() >= half_len {
+                break;
+            }
+
+            match cg.char() {
+                'M' | '=' | 'X' => {
+                    let len = (cg.len() as usize).min(half_len - tail_read_seq_half1.len());
+                    for _ in 0..len {
+                        let read_base = record.seq()[read_pos];
+                        tail_read_seq_half1.push((read_base as char).to_ascii_lowercase());
+
+                        debug_assert_eq!(
+                            ref_seqs[chr][ref_pos as usize],
+                            tail_ref_seq.as_bytes()[ref_idx]
+                        );
+                        ref_idx = ref_idx.wrapping_sub(1);
+                        ref_pos -= 1;
+                        read_pos -= 1;
+                    }
+                }
+                'D' => {
+                    let len = (cg.len() as usize).min(half_len - tail_read_seq_half1.len());
+                    for _ in 0..len {
+                        tail_read_seq_half1.push('-');
+                        debug_assert_eq!(
+                            ref_seqs[chr][ref_pos as usize],
+                            tail_ref_seq.as_bytes()[ref_idx]
+                        );
+                        ref_idx = ref_idx.wrapping_sub(1);
+                        ref_pos -= 1;
+                    }
+                }
+                'N' => {
+                    let len = (cg.len() as usize).min(half_len - tail_read_seq_half1.len());
+                    for _ in 0..len {
+                        tail_read_seq_half1.push('N');
+                        debug_assert_eq!(
+                            ref_seqs[chr][ref_pos as usize],
+                            tail_ref_seq.as_bytes()[ref_idx]
+                        );
+                        ref_idx = ref_idx.wrapping_sub(1);
+                        ref_pos -= 1;
+                    }
+                }
+                'I' => {
+                    read_pos -= cg.len() as usize;
+                }
+                'S' | 'H' => {
+                    // Soft/Hard clip - 跳过
+                }
+                _ => {}
+            }
+        }
+
+        // 填充不足部分
+        while tail_read_seq_half1.len() < half_len {
+            tail_read_seq_half1.push('*');
+        }
+
+        // 反向字符串（因为是从后往前收集的）
+        let tail_read_seq_half1: String = tail_read_seq_half1.chars().rev().collect();
+
+        // ---------------------------
+        // 提取尾部读序列右半部分（soft-clip后的序列，带padding）
+        // ---------------------------
+        let tail_read_seq_half2: String = (tail_read_pos as i64..tail_read_pos as i64 + half_len as i64)
+            .map(|p| {
+                if p < 0 || p >= read_len {
+                    '*'
+                } else {
+                    (record.seq()[p as usize] as char).to_ascii_lowercase()
+                }
+            })
+            .collect();
+
+        // 合并尾部读序列两半
+        let tail_read_seq = format!("{}{}", tail_read_seq_half1, tail_read_seq_half2);
+
+        let mut tail_feature = IPFeature {
+            reference_sequence: tail_ref_seq.into_bytes(),
+            read_sequence: tail_read_seq.into_bytes(),
+            chr: chr.to_string(),
+            start: tail_ref_pos - half_len as i64 + 1, // 转为1-based
+            end: tail_ref_pos + half_len as i64, // 1-based, exclusive
+            readname: String::from_utf8_lossy(record.qname()).to_string(),
+            label: 0, // 先标记为非内部引物，后续根据窗口特征更新
+        };
+
+
         if primers_trimmed {
             // primers trimmed
             let win1_ref_seq = ref_seqs[chr][win1_start as usize..win1_end as usize].to_ascii_lowercase();
@@ -362,6 +638,13 @@ pub fn read_bam(bam_path: &str,
                 out_records.push(record);
             }
 
+            if (win1_a_fraction >= fraction || win1_t_fraction >= fraction) && win1_dist > end_distance {
+                head_feature.label = 1;
+            }
+            if (win2_a_fraction >= fraction || win2_t_fraction >= fraction) && win2_dist > end_distance {
+                tail_feature.label = 1;
+            }
+
             // if (win1_a_fraction >= fraction || win1_t_fraction >= fraction) && (!has_annotated_intron || win1_dist > end_distance) {
             //     discarded_records.push(record);
             // } else if (win2_a_fraction >= fraction || win2_t_fraction >= fraction) && (!has_annotated_intron || win2_dist > end_distance) {
@@ -391,30 +674,30 @@ pub fn read_bam(bam_path: &str,
             // find the closest transcript end to win2_end
             let win2_dist = closest_distance(&sorted_ends, win2_end); // win2_start is 0-base, exclusive, sorted_ends is 1-based
 
-            // if record.qname() == b"<read-name>" {
-            //     info!("win1 polyT: {}", is_polyT_win1);
-            //     info!("win2 polyA: {}", is_polyA_win2);
-            //     info!("win1 dist: {}, win1_start: {}", win1_dist, win1_start + 1);
-            //     info!("win2 dist: {}, win2_end: {}", win2_dist, win2_end);
-            //     // info!("has annotated intron: {}", has_annotated_intron);
-            //     info!("win1_A: {:?}\t{:?},{}/{}", win1_a_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_A_count, window_size);
-            //     info!("win1_T: {:?}\t{:?},{}/{}", win1_t_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_T_count, window_size);
-            //     info!("win2_A: {:?}\t{:?},{}/{}", win2_a_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_A_count, window_size);
-            //     info!("win2_T: {:?}\t{:?},{}/{}", win2_t_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_T_count, window_size);
-            //     info!("igv region: {}:{}-{},{}:{}-{}", chr, win1_start + 1, win1_end, chr, win2_start + 1, win2_end);
-            //     info!("ref pos (1-based, inclusive): {}\t{}", start + 1, end);
-            //     info!("ref seq: {:?}\t{:?}", std::str::from_utf8(&win1_ref_seq), std::str::from_utf8(&win2_ref_seq));
-            //     info!("read seq: {:?}\t{:?}", std::str::from_utf8(&win1_read_seq), std::str::from_utf8(&win2_read_seq));
-            //     info!("{}:{}, {}:{}", begin_cigar.unwrap().char(), begin_cigar.unwrap().len(), end_cigar.unwrap().char(), end_cigar.unwrap().len());
-            //     // info!("Annotated intron: {}", annotated_intron);
-            //     if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
-            //         info!("discarded by win1");
-            //     } else if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
-            //         info!("discarded by win2");
-            //     } else {
-            //         info!("not discarded");
-            //     }
-            // }
+            if record.qname() == b"SRR30901279.15182054" {
+                info!("win1 polyT: {}", is_polyT_win1);
+                info!("win2 polyA: {}", is_polyA_win2);
+                info!("win1 dist: {}, win1_start: {}", win1_dist, win1_start + 1);
+                info!("win2 dist: {}, win2_end: {}", win2_dist, win2_end);
+                // info!("has annotated intron: {}", has_annotated_intron);
+                info!("win1_A: {:?}\t{:?},{}/{}", win1_a_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_A_count, window_size);
+                info!("win1_T: {:?}\t{:?},{}/{}", win1_t_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_T_count, window_size);
+                info!("win2_A: {:?}\t{:?},{}/{}", win2_a_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_A_count, window_size);
+                info!("win2_T: {:?}\t{:?},{}/{}", win2_t_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_T_count, window_size);
+                info!("igv region: {}:{}-{},{}:{}-{}", chr, win1_start + 1, win1_end, chr, win2_start + 1, win2_end);
+                info!("ref pos (1-based, inclusive): {}\t{}", start + 1, end);
+                info!("ref seq: {:?}\t{:?}", std::str::from_utf8(&win1_ref_seq), std::str::from_utf8(&win2_ref_seq));
+                info!("read seq: {:?}\t{:?}", std::str::from_utf8(&win1_read_seq), std::str::from_utf8(&win2_read_seq));
+                info!("{}:{}, {}:{}", begin_cigar.unwrap().char(), begin_cigar.unwrap().len(), end_cigar.unwrap().char(), end_cigar.unwrap().len());
+                // info!("Annotated intron: {}", annotated_intron);
+                if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
+                    info!("discarded by win1");
+                } else if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
+                    info!("discarded by win2");
+                } else {
+                    info!("not discarded");
+                }
+            }
 
             // Discard the records: polyA signal + far from known transcript ends (2 conditions must be satisfied)
             if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
@@ -423,6 +706,13 @@ pub fn read_bam(bam_path: &str,
                 discarded_records.push(record);
             } else {
                 out_records.push(record);
+            }
+
+            if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
+                head_feature.label = 1;
+            }
+            if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
+                tail_feature.label = 1;
             }
 
             // // Discard the records: polyA signal + no annotated intron + far from known transcript ends (3 conditions must be satisfied)
@@ -434,6 +724,8 @@ pub fn read_bam(bam_path: &str,
             //     out_records.push(record);
             // }
         }
+        out_features.push(head_feature);
+        out_features.push(tail_feature);
     }
-    (out_records, discarded_records)
+    (out_records, discarded_records, out_features)
 }
