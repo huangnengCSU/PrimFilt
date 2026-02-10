@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from dataset import build_vocab
 from stream_dataset import StreamingPrimingDataset, count_split_labels
 from train_model import BiLSTMClassifier, BinaryFocalLossWithLogits, CNNClassifier, compute_binary_metrics
+
+PBAR_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt} samples [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
+
+
+def resolve_progress(mode: str) -> bool:
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return sys.stderr.isatty()
 
 
 def evaluate_stream(
@@ -19,6 +31,9 @@ def evaluate_stream(
     device: torch.device,
     criterion: nn.Module,
     max_batches: Optional[int] = None,
+    total_samples: Optional[int] = None,
+    desc: str = "val",
+    show_progress: bool = True,
 ) -> Tuple[float, Dict[str, float], int]:
     model.eval()
     total_loss = 0.0
@@ -26,6 +41,15 @@ def evaluate_stream(
     logits_all: List[torch.Tensor] = []
     y_all: List[torch.Tensor] = []
     with torch.no_grad():
+        pbar = tqdm(
+            total=total_samples,
+            desc=desc,
+            unit="sample",
+            leave=False,
+            dynamic_ncols=True,
+            bar_format=PBAR_FORMAT,
+            disable=not show_progress,
+        )
         for bi, (x, y) in enumerate(loader):
             if max_batches is not None and bi >= max_batches:
                 break
@@ -37,6 +61,9 @@ def evaluate_stream(
             total_count += bs
             logits_all.append(logits.detach().cpu())
             y_all.append(y.detach().cpu())
+            pbar.update(bs)
+            pbar.set_postfix(loss=f"{loss.item():.4f}")
+        pbar.close()
 
     if total_count == 0:
         empty = {"acc": 0.0, "precision": 0.0, "recall": 0.0, "specificity": 0.0, "balanced_acc": 0.0, "f1": 0.0}
@@ -82,10 +109,12 @@ def main() -> None:
     parser.add_argument("--max-train-batches", type=int, default=None, help="Debug only: cap train batches/epoch.")
     parser.add_argument("--max-val-batches", type=int, default=None, help="Cap validation batches/epoch for speed.")
     parser.add_argument("--save-model", type=Path, default=Path("./internal_priming_stream.pt"))
+    parser.add_argument("--progress", choices=["auto", "on", "off"], default="auto", help="Progress bar display mode.")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    show_progress = resolve_progress(args.progress)
     vocab = build_vocab()
 
     counts = count_split_labels(args.bed, train_ratio=args.train_ratio, seed=args.seed)
@@ -159,6 +188,18 @@ def main() -> None:
         train_logits_all: List[torch.Tensor] = []
         train_y_all: List[torch.Tensor] = []
 
+        train_total_samples = train_pos + train_neg
+        if args.max_train_batches is not None:
+            train_total_samples = min(train_total_samples, args.max_train_batches * args.batch_size)
+        train_pbar = tqdm(
+            total=train_total_samples,
+            desc=f"epoch {epoch}/{args.epochs} train",
+            unit="sample",
+            leave=False,
+            dynamic_ncols=True,
+            bar_format=PBAR_FORMAT,
+            disable=not show_progress,
+        )
         for bi, (x, y) in enumerate(train_loader):
             if args.max_train_batches is not None and bi >= args.max_train_batches:
                 break
@@ -174,6 +215,9 @@ def main() -> None:
             train_count += bs
             train_logits_all.append(logits.detach().cpu())
             train_y_all.append(y.detach().cpu())
+            train_pbar.update(bs)
+            train_pbar.set_postfix(loss=f"{loss.item():.4f}")
+        train_pbar.close()
 
         if train_count == 0:
             raise RuntimeError("No train samples consumed in this epoch.")
@@ -186,6 +230,11 @@ def main() -> None:
             device=device,
             criterion=criterion,
             max_batches=args.max_val_batches,
+            total_samples=min(val_pos + val_neg, args.max_val_batches * args.batch_size)
+            if args.max_val_batches is not None
+            else (val_pos + val_neg),
+            desc=f"epoch {epoch}/{args.epochs} val",
+            show_progress=show_progress,
         )
         if val_count == 0:
             raise RuntimeError("No val samples consumed in this epoch.")

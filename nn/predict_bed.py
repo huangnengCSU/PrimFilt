@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
+from tqdm.auto import tqdm
 
 from dataset import build_vocab, encode_seq, parse_bed_line
 from train_model import BiLSTMClassifier, CNNClassifier
+
+PBAR_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt} samples [{elapsed}<{remaining}, {rate_fmt}]"
+
+
+def resolve_progress(mode: str) -> bool:
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return sys.stderr.isatty()
 
 
 class BedInferenceDataset(Dataset):
@@ -93,10 +105,20 @@ def predict_probs(
     vocab: Dict[str, int],
     batch_size: int,
     device: torch.device,
+    show_progress: bool,
 ) -> List[float]:
     dataset = BedInferenceDataset(rows=rows, seq_len=seq_len, vocab=vocab)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     probs = [0.0] * len(rows)
+    pbar = tqdm(
+        total=len(rows),
+        desc="predict",
+        unit="sample",
+        leave=False,
+        dynamic_ncols=True,
+        bar_format=PBAR_FORMAT,
+        disable=not show_progress,
+    )
     with torch.no_grad():
         for x, batch_idx in loader:
             x = x.to(device)
@@ -104,6 +126,8 @@ def predict_probs(
             p = torch.sigmoid(logits).squeeze(1).detach().cpu().tolist()
             for i, row_idx in enumerate(batch_idx.tolist()):
                 probs[row_idx] = float(p[i])
+            pbar.update(len(batch_idx))
+    pbar.close()
     return probs
 
 
@@ -135,7 +159,9 @@ def main() -> None:
         help="Append 1 column (P(label=1)) or 2 columns (P(label=0), P(label=1)).",
     )
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--progress", choices=["auto", "on", "off"], default="auto", help="Progress bar display mode.")
     args = parser.parse_args()
+    show_progress = resolve_progress(args.progress)
 
     if args.device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -155,28 +181,44 @@ def main() -> None:
         vocab=vocab,
         batch_size=args.batch_size,
         device=device,
+        show_progress=show_progress,
     )
 
     # Preserve file line order by second pass write.
     prob_iter = iter(probs)
+    total_lines = len(valid_rows) + len(passthrough)
+    write_pbar = tqdm(
+        total=total_lines,
+        desc="write",
+        unit="line",
+        leave=False,
+        dynamic_ncols=True,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}行 [{elapsed}<{remaining}, {rate_fmt}]",
+        disable=not show_progress,
+    )
     with args.input_bed.open("r", encoding="utf-8", errors="ignore") as src, args.output_bed.open("w", encoding="utf-8") as dst:
         for line in src:
             raw = line.rstrip("\n")
             if not raw or raw.startswith("#"):
                 dst.write(raw + "\n")
+                write_pbar.update(1)
                 continue
             parts = raw.split("\t")
             if len(parts) < 7:
                 dst.write(raw + "\n")
+                write_pbar.update(1)
                 continue
             try:
                 _ = parse_bed_line(raw)
             except Exception:
                 dst.write(raw + "\n")
+                write_pbar.update(1)
                 continue
             p = next(prob_iter)
             out_line = format_out_row(parts, prob_pos=p, threshold=args.threshold, prob_cols=args.prob_cols)
             dst.write(out_line + "\n")
+            write_pbar.update(1)
+    write_pbar.close()
 
     print(f"Loaded model: {args.model_path.resolve()}")
     print(f"Input rows predicted: {len(valid_rows)}")

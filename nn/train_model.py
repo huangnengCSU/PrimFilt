@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
+from tqdm.auto import tqdm
 
 from dataset import PrimingDataset, build_vocab, load_bed_records
+
+PBAR_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt} samples [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
+
+
+def resolve_progress(mode: str) -> bool:
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return sys.stderr.isatty()
 
 
 class BiLSTMClassifier(nn.Module):
@@ -205,13 +217,30 @@ def compute_binary_metrics(logits: torch.Tensor, labels: torch.Tensor) -> Dict[s
     }
 
 
-def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, criterion: nn.Module) -> Tuple[float, Dict[str, float]]:
+def evaluate(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    criterion: nn.Module,
+    total_samples: Optional[int] = None,
+    desc: str = "val",
+    show_progress: bool = True,
+) -> Tuple[float, Dict[str, float]]:
     model.eval()
     total_loss = 0.0
     total_count = 0
     logits_all: List[torch.Tensor] = []
     y_all: List[torch.Tensor] = []
     with torch.no_grad():
+        pbar = tqdm(
+            total=total_samples,
+            desc=desc,
+            unit="sample",
+            leave=False,
+            dynamic_ncols=True,
+            bar_format=PBAR_FORMAT,
+            disable=not show_progress,
+        )
         for x, y in loader:
             x, y = x.to(device), y.to(device)
             logits = model(x)
@@ -220,6 +249,9 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, criteri
             total_count += x.size(0)
             logits_all.append(logits.detach().cpu())
             y_all.append(y.detach().cpu())
+            pbar.update(x.size(0))
+            pbar.set_postfix(loss=f"{loss.item():.4f}")
+        pbar.close()
     if not logits_all:
         return 0.0, {"acc": 0.0, "precision": 0.0, "recall": 0.0, "specificity": 0.0, "balanced_acc": 0.0, "f1": 0.0}
     logits_cat = torch.cat(logits_all, dim=0)
@@ -257,10 +289,12 @@ def main() -> None:
     )
     parser.add_argument("--focal-gamma", type=float, default=2.0, help="Gamma for focal loss.")
     parser.add_argument("--save-model", type=Path, default=Path("./internal_priming_model.pt"))
+    parser.add_argument("--progress", choices=["auto", "on", "off"], default="auto", help="Progress bar display mode.")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    show_progress = resolve_progress(args.progress)
 
     records = load_bed_records(args.bed)
     if len(records) < 2:
@@ -342,6 +376,15 @@ def main() -> None:
         train_count = 0
         train_logits_all: List[torch.Tensor] = []
         train_y_all: List[torch.Tensor] = []
+        train_pbar = tqdm(
+            total=len(train_indices),
+            desc=f"epoch {epoch}/{args.epochs} train",
+            unit="sample",
+            leave=False,
+            dynamic_ncols=True,
+            bar_format=PBAR_FORMAT,
+            disable=not show_progress,
+        )
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
@@ -354,10 +397,21 @@ def main() -> None:
             train_count += x.size(0)
             train_logits_all.append(logits.detach().cpu())
             train_y_all.append(y.detach().cpu())
+            train_pbar.update(x.size(0))
+            train_pbar.set_postfix(loss=f"{loss.item():.4f}")
+        train_pbar.close()
 
         train_loss /= max(train_count, 1)
         train_metrics = compute_binary_metrics(torch.cat(train_logits_all, dim=0), torch.cat(train_y_all, dim=0))
-        val_loss, val_metrics = evaluate(model, val_loader, device, criterion)
+        val_loss, val_metrics = evaluate(
+            model,
+            val_loader,
+            device,
+            criterion,
+            total_samples=len(val_indices),
+            desc=f"epoch {epoch}/{args.epochs} val",
+            show_progress=show_progress,
+        )
 
         if val_metrics["balanced_acc"] > best_val_balanced_acc:
             best_val_balanced_acc = val_metrics["balanced_acc"]
