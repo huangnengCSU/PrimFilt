@@ -427,9 +427,11 @@ def main() -> None:
 
         print(
             f"Epoch {epoch:02d}/{args.epochs} | "
-            f"train_loss={train_loss:.4f} train_bal_acc={train_metrics['balanced_acc']:.4f} train_f1={train_metrics['f1']:.4f} | "
-            f"val_loss={val_loss:.4f} val_bal_acc={val_metrics['balanced_acc']:.4f} val_f1={val_metrics['f1']:.4f} "
-            f"val_rec={val_metrics['recall']:.4f} val_spec={val_metrics['specificity']:.4f}"
+            f"train_loss={train_loss:.4f} train_bal_acc={train_metrics['balanced_acc']:.4f} "
+            f"train_prec={train_metrics['precision']:.4f} train_rec={train_metrics['recall']:.4f} train_f1={train_metrics['f1']:.4f} | "
+            f"val_loss={val_loss:.4f} val_bal_acc={val_metrics['balanced_acc']:.4f} "
+            f"val_prec={val_metrics['precision']:.4f} val_rec={val_metrics['recall']:.4f} val_f1={val_metrics['f1']:.4f} "
+            f"val_spec={val_metrics['specificity']:.4f}"
         )
 
     print(f"Best val_balanced_acc={best_val_balanced_acc:.4f}")
