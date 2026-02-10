@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 from dataset import PrimingDataset, build_vocab, load_bed_records
 
 PBAR_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt} samples [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
+PBAR_NCOLS = 100
 
 
 def resolve_progress(mode: str) -> bool:
@@ -237,7 +238,7 @@ def evaluate(
             desc=desc,
             unit="sample",
             leave=False,
-            dynamic_ncols=True,
+            ncols=PBAR_NCOLS,
             bar_format=PBAR_FORMAT,
             disable=not show_progress,
         )
@@ -381,7 +382,7 @@ def main() -> None:
             desc=f"epoch {epoch}/{args.epochs} train",
             unit="sample",
             leave=False,
-            dynamic_ncols=True,
+            ncols=PBAR_NCOLS,
             bar_format=PBAR_FORMAT,
             disable=not show_progress,
         )

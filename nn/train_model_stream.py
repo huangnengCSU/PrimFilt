@@ -15,6 +15,7 @@ from stream_dataset import StreamingPrimingDataset, count_split_labels
 from train_model import BiLSTMClassifier, BinaryFocalLossWithLogits, CNNClassifier, compute_binary_metrics
 
 PBAR_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt} samples [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
+PBAR_NCOLS = 100
 
 
 def resolve_progress(mode: str) -> bool:
@@ -46,7 +47,7 @@ def evaluate_stream(
             desc=desc,
             unit="sample",
             leave=False,
-            dynamic_ncols=True,
+            ncols=PBAR_NCOLS,
             bar_format=PBAR_FORMAT,
             disable=not show_progress,
         )
@@ -196,7 +197,7 @@ def main() -> None:
             desc=f"epoch {epoch}/{args.epochs} train",
             unit="sample",
             leave=False,
-            dynamic_ncols=True,
+            ncols=PBAR_NCOLS,
             bar_format=PBAR_FORMAT,
             disable=not show_progress,
         )

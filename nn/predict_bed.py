@@ -14,6 +14,7 @@ from dataset import build_vocab, encode_seq, parse_bed_line
 from train_model import BiLSTMClassifier, CNNClassifier
 
 PBAR_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt} samples [{elapsed}<{remaining}, {rate_fmt}]"
+PBAR_NCOLS = 100
 
 
 def resolve_progress(mode: str) -> bool:
@@ -115,7 +116,7 @@ def predict_probs(
         desc="predict",
         unit="sample",
         leave=False,
-        dynamic_ncols=True,
+        ncols=PBAR_NCOLS,
         bar_format=PBAR_FORMAT,
         disable=not show_progress,
     )
@@ -192,8 +193,8 @@ def main() -> None:
         desc="write",
         unit="line",
         leave=False,
-        dynamic_ncols=True,
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}行 [{elapsed}<{remaining}, {rate_fmt}]",
+        ncols=PBAR_NCOLS,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} lines [{elapsed}<{remaining}, {rate_fmt}]",
         disable=not show_progress,
     )
     with args.input_bed.open("r", encoding="utf-8", errors="ignore") as src, args.output_bed.open("w", encoding="utf-8") as dst:
