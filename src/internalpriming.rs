@@ -674,30 +674,30 @@ pub fn read_bam(bam_path: &str,
             // find the closest transcript end to win2_end
             let win2_dist = closest_distance(&sorted_ends, win2_end); // win2_start is 0-base, exclusive, sorted_ends is 1-based
 
-            if record.qname() == b"SRR30901279.15182054" {
-                info!("win1 polyT: {}", is_polyT_win1);
-                info!("win2 polyA: {}", is_polyA_win2);
-                info!("win1 dist: {}, win1_start: {}", win1_dist, win1_start + 1);
-                info!("win2 dist: {}, win2_end: {}", win2_dist, win2_end);
-                // info!("has annotated intron: {}", has_annotated_intron);
-                info!("win1_A: {:?}\t{:?},{}/{}", win1_a_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_A_count, window_size);
-                info!("win1_T: {:?}\t{:?},{}/{}", win1_t_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_T_count, window_size);
-                info!("win2_A: {:?}\t{:?},{}/{}", win2_a_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_A_count, window_size);
-                info!("win2_T: {:?}\t{:?},{}/{}", win2_t_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_T_count, window_size);
-                info!("igv region: {}:{}-{},{}:{}-{}", chr, win1_start + 1, win1_end, chr, win2_start + 1, win2_end);
-                info!("ref pos (1-based, inclusive): {}\t{}", start + 1, end);
-                info!("ref seq: {:?}\t{:?}", std::str::from_utf8(&win1_ref_seq), std::str::from_utf8(&win2_ref_seq));
-                info!("read seq: {:?}\t{:?}", std::str::from_utf8(&win1_read_seq), std::str::from_utf8(&win2_read_seq));
-                info!("{}:{}, {}:{}", begin_cigar.unwrap().char(), begin_cigar.unwrap().len(), end_cigar.unwrap().char(), end_cigar.unwrap().len());
-                // info!("Annotated intron: {}", annotated_intron);
-                if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
-                    info!("discarded by win1");
-                } else if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
-                    info!("discarded by win2");
-                } else {
-                    info!("not discarded");
-                }
-            }
+            // if record.qname() == b"<read-name>" {
+            //     info!("win1 polyT: {}", is_polyT_win1);
+            //     info!("win2 polyA: {}", is_polyA_win2);
+            //     info!("win1 dist: {}, win1_start: {}", win1_dist, win1_start + 1);
+            //     info!("win2 dist: {}, win2_end: {}", win2_dist, win2_end);
+            //     // info!("has annotated intron: {}", has_annotated_intron);
+            //     info!("win1_A: {:?}\t{:?},{}/{}", win1_a_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_A_count, window_size);
+            //     info!("win1_T: {:?}\t{:?},{}/{}", win1_t_fraction, std::str::from_utf8(&major_bases_win1).unwrap(), win1_matched_T_count, window_size);
+            //     info!("win2_A: {:?}\t{:?},{}/{}", win2_a_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_A_count, window_size);
+            //     info!("win2_T: {:?}\t{:?},{}/{}", win2_t_fraction, std::str::from_utf8(&major_bases_win2).unwrap(), win2_matched_T_count, window_size);
+            //     info!("igv region: {}:{}-{},{}:{}-{}", chr, win1_start + 1, win1_end, chr, win2_start + 1, win2_end);
+            //     info!("ref pos (1-based, inclusive): {}\t{}", start + 1, end);
+            //     info!("ref seq: {:?}\t{:?}", std::str::from_utf8(&win1_ref_seq), std::str::from_utf8(&win2_ref_seq));
+            //     info!("read seq: {:?}\t{:?}", std::str::from_utf8(&win1_read_seq), std::str::from_utf8(&win2_read_seq));
+            //     info!("{}:{}, {}:{}", begin_cigar.unwrap().char(), begin_cigar.unwrap().len(), end_cigar.unwrap().char(), end_cigar.unwrap().len());
+            //     // info!("Annotated intron: {}", annotated_intron);
+            //     if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
+            //         info!("discarded by win1");
+            //     } else if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
+            //         info!("discarded by win2");
+            //     } else {
+            //         info!("not discarded");
+            //     }
+            // }
 
             // Discard the records: polyA signal + far from known transcript ends (2 conditions must be satisfied)
             if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
