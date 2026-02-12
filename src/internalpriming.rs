@@ -120,6 +120,9 @@ pub fn read_bam(bam_path: &str,
     bam.fetch((chr.as_bytes(), 0, chr_len)).expect("Failed to fetch region");
     for r in bam.records() {
         let record = r.expect("Failed to read BAM record");
+        if record.is_secondary() || record.is_supplementary() || record.is_unmapped() {
+            continue; // skip secondary, supplementary and unmapped reads
+        }
         // Process the record as needed
         let start = record.reference_start(); // 0-based, inclusive
         let end = record.reference_end(); // 0-based, exclusive
