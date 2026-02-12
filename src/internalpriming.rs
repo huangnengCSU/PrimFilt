@@ -112,7 +112,10 @@ pub fn read_bam(bam_path: &str,
     let mut bam = bam::IndexedReader::from_path(bam_path).expect("Failed to open BAM file");
     // bam.set_threads(num_threads).expect("Failed to set BAM threads");
     let header = bam.header().to_owned();
-    let tid = header.tid(chr.as_bytes()).expect("Chromosome not found");
+    // let tid = header.tid(chr.as_bytes()).expect("Chromosome not found");
+    let tid = if let Some(t) = header.tid(chr.as_bytes()) { t } else {
+        return (out_records, discarded_records); // if chromosome not found in BAM, return empty records
+    };
     let chr_len = header.target_len(tid).unwrap();
     bam.fetch((chr.as_bytes(), 0, chr_len)).expect("Failed to fetch region");
     for r in bam.records() {
