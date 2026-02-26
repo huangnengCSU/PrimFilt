@@ -23,7 +23,9 @@ Options:
   -o, --output <OUTPUT>
           Filtered output BAM file
   -d, --discarded-output <DISCARDED_OUTPUT>
-          Discarded output BAM file, optional
+          Discarded output BAM file, optional. Cannot be used with --tag-mode
+  -m, --tag-mode
+          Tag mode: write all reads to a single output BAM with a pf:Z tag (keep/discard) instead of splitting into two files. Cannot be used with --discarded-output
   -p, --primers-trimmed
           Primer sequences (e.g. oligo(dT)) are trimmed from reads, default: false
   -w, --window-size <WINDOW_SIZE>
@@ -49,8 +51,18 @@ PrimFilt -i input.bam -r reference.fa -a annotation.gtf -o filtered.bam -d disca
 ```shell
 PrimFilt -i input.bam -r reference.fa -o filtered.bam -d discarded.bam -w 20 -f 0.7 -t 8 -p
 ```
+- **Tag mode**. Instead of writing kept and discarded reads to two separate files, use `--tag-mode` (`-m`) to write all reads to a single output BAM. Each read is annotated with a `pf:Z` tag: `keep` for reads that pass filtering, `discard` for internally primed reads. This mode cannot be used together with `--discarded-output`.
+```shell
+PrimFilt -i input.bam -r reference.fa -o all.bam -w 20 -f 0.7 -t 8 -m
+# Downstream filtering by tag using samtools
+samtools view -e '[pf]=="keep"' all.bam -o kept.bam
+samtools view -e '[pf]=="discard"' all.bam -o discarded.bam
+```
 
 ## Update Log
+### 0.1.4 - 2026-02-26
+- Added `--tag-mode` (`-m`) argument: instead of splitting reads into two BAM files, writes all reads to a single output BAM annotated with a `pf:Z` tag (`keep` or `discard`) to indicate the filtering result. Mutually exclusive with `--discarded-output`.
+
 ### 0.1.3 - 2026-02-09
 - Replaced `IntervalTree` with `ArrayBackedIntervalTree` to improve interval query performance.
 - Updated read-filtering logic: filtering is now based solely on internal priming signals and the distance to known transcript ends (if annotation provided); the presence of annotated introns is no longer considered.

@@ -106,7 +106,8 @@ pub fn read_bam(bam_path: &str,
                 primers_trimmed: bool,
                 window_size: usize,
                 fraction: f32,
-                end_distance: i64) -> (Vec<Record>, Vec<Record>) {
+                end_distance: i64,
+                tag_mode: bool) -> (Vec<Record>, Vec<Record>) {
     let mut out_records = Vec::new();
     let mut discarded_records = Vec::new();
     let mut bam = bam::IndexedReader::from_path(bam_path).expect("Failed to open BAM file");
@@ -119,7 +120,7 @@ pub fn read_bam(bam_path: &str,
     let chr_len = header.target_len(tid).unwrap();
     bam.fetch((chr.as_bytes(), 0, chr_len)).expect("Failed to fetch region");
     for r in bam.records() {
-        let record = r.expect("Failed to read BAM record");
+        let mut record = r.expect("Failed to read BAM record");
         if record.is_secondary() || record.is_supplementary() || record.is_unmapped() {
             continue; // skip secondary, supplementary and unmapped reads
         }
@@ -360,9 +361,14 @@ pub fn read_bam(bam_path: &str,
             //     }
             // }
 
-            if (win1_a_fraction >= fraction || win1_t_fraction >= fraction) && win1_dist > end_distance {
-                discarded_records.push(record);
-            } else if (win2_a_fraction >= fraction || win2_t_fraction >= fraction) && win2_dist > end_distance {
+            let is_discarded =
+                ((win1_a_fraction >= fraction || win1_t_fraction >= fraction) && win1_dist > end_distance) ||
+                ((win2_a_fraction >= fraction || win2_t_fraction >= fraction) && win2_dist > end_distance);
+            if tag_mode {
+                let tag_val = if is_discarded { "discard" } else { "keep" };
+                record.push_aux(b"pf", Aux::String(tag_val)).expect("Error adding pf tag");
+                out_records.push(record);
+            } else if is_discarded {
                 discarded_records.push(record);
             } else {
                 out_records.push(record);
@@ -423,9 +429,14 @@ pub fn read_bam(bam_path: &str,
             // }
 
             // Discard the records: polyA signal + far from known transcript ends (2 conditions must be satisfied)
-            if (is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance {
-                discarded_records.push(record);
-            } else if (is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance {
+            let is_discarded =
+                ((is_polyT_win1 && win1_t_fraction >= fraction) && win1_dist > end_distance) ||
+                ((is_polyA_win2 && win2_a_fraction >= fraction) && win2_dist > end_distance);
+            if tag_mode {
+                let tag_val = if is_discarded { "discard" } else { "keep" };
+                record.push_aux(b"pf", Aux::String(tag_val)).expect("Error adding pf tag");
+                out_records.push(record);
+            } else if is_discarded {
                 discarded_records.push(record);
             } else {
                 out_records.push(record);
