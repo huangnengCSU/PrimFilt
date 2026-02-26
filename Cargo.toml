@@ -1,6 +1,6 @@
 [package]
 name = "PrimFilt"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Neng Huang <neng@ds.dfci.harvard.edu>"]
 description = "A long-read RNA-seq internal priming detection and filtering tool."
